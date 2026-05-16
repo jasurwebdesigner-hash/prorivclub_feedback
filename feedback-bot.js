@@ -1,13 +1,13 @@
 // ══════════════════════════════════════════════════════
-//  ПРОРЫВ — Бот обратной связи
+//  ПРОРЫВ — Бот обратной связи с возможностью ответа
 //  Запуск: node feedback-bot.js
 // ══════════════════════════════════════════════════════
 
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 
-const BOT_TOKEN = process.env.FEEDBACK_BOT_TOKEN; // токен этого бота
-const ADMIN_ID  = process.env.FEEDBACK_ADMIN_ID;  // ваш Telegram ID (куда падают сообщения)
+const BOT_TOKEN = process.env.FEEDBACK_BOT_TOKEN;
+const ADMIN_ID  = Number(process.env.FEEDBACK_ADMIN_ID);
 
 if (!BOT_TOKEN || !ADMIN_ID) {
   console.error('❌ Укажите FEEDBACK_BOT_TOKEN и FEEDBACK_ADMIN_ID в .env');
@@ -16,48 +16,89 @@ if (!BOT_TOKEN || !ADMIN_ID) {
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
+// Когда админ нажал "Ответить" — сохраняем userId получателя
+const awaitingReply = {}; // { adminId: targetUserId }
+
 console.log('🤖 Бот обратной связи запущен...');
 
 // ── /start ──────────────────────────────────────────────
 bot.onText(/\/start/, (msg) => {
   const name = msg.from.first_name || 'друг';
-
   bot.sendMessage(msg.chat.id,
-    `Привет, ${name}! 👋\n\n` +
-    `Это анонимная обратная связь клуба *ПРОРЫВ*.\n\n` +
-    `Напиши любое сообщение — пожелание, идею, замечание или вопрос. Мы обязательно прочитаем.\n\n` +
-    `_Все сообщения полностью анонимны — мы не знаем кто ты._`,
-    { parse_mode: 'Markdown' }
+    `Добро пожаловать в бот анонимной обратной связи мужского клуба «ПРОРЫВ».\n\n` +
+    `Здесь вы можете написать любое пожелание, идею, замечание или вопрос. Мы внимательно читаем каждое сообщение и стараемся ответить в кратчайшие сроки.\n\n` +
+    `Все сообщения полностью анонимны. Однако если вы хотите, чтобы мы знали к кому обратиться — можете указать своё имя в сообщении.`
   );
 });
 
-// ── Любое другое сообщение = обратная связь ─────────────
-bot.on('message', (msg) => {
-  // Игнорируем команды
-  if (msg.text?.startsWith('/')) return;
-
+// ── Входящее сообщение ──────────────────────────────────
+bot.on('message', async (msg) => {
   const userId = msg.chat.id;
+  const text   = msg.text || '';
 
-  // 1) Подтверждение пользователю
-  bot.sendMessage(userId,
-    `✅ Спасибо! Ваше сообщение получено.\n\n_Мы читаем каждое обращение._`,
-    { parse_mode: 'Markdown' }
-  );
+  if (text.startsWith('/')) return;
 
-  // 2) Пересылаем администратору — БЕЗ имени и ID отправителя
-  const text = msg.text || '[не текстовое сообщение]';
-  const time  = new Date().toLocaleString('ru', {
+  // Если АДМИН сейчас в режиме ответа — отправляем его ответ пользователю
+  if (userId === ADMIN_ID && awaitingReply[ADMIN_ID]) {
+    const targetUserId = awaitingReply[ADMIN_ID];
+    delete awaitingReply[ADMIN_ID];
+
+    try {
+      await bot.sendMessage(targetUserId,
+        `💬 *Ответ от команды ПРОРЫВ:*\n\n${text}`,
+        { parse_mode: 'Markdown' }
+      );
+      bot.sendMessage(ADMIN_ID, '✅ Ответ отправлен.');
+    } catch {
+      bot.sendMessage(ADMIN_ID, '❌ Не удалось отправить — пользователь мог заблокировать бота.');
+    }
+    return;
+  }
+
+  // Обычное сообщение от пользователя
+  const time = new Date().toLocaleString('ru', {
     timeZone: 'Asia/Tashkent',
     day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit'
   });
 
-  bot.sendMessage(ADMIN_ID,
-    `📩 *Новая обратная связь*\n\n` +
-    `${text}\n\n` +
-    `_${time} · анонимно_`,
+  // Подтверждение пользователю
+  bot.sendMessage(userId,
+    `✅ Сообщение получено. Мы ответим если потребуется.\n\n_Спасибо за обратную связь!_`,
     { parse_mode: 'Markdown' }
   );
+
+  // Отправляем админу с кнопкой "Ответить"
+  await bot.sendMessage(ADMIN_ID,
+    `📩 *Новая обратная связь*\n\n${text}\n\n_${time} · анонимно_`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [[
+          { text: '💬 Ответить', callback_data: `reply_${userId}` }
+        ]]
+      }
+    }
+  );
+});
+
+// ── Нажатие кнопки "Ответить" ───────────────────────────
+bot.on('callback_query', async (query) => {
+  if (query.from.id !== ADMIN_ID) {
+    bot.answerCallbackQuery(query.id, { text: 'Нет доступа.' });
+    return;
+  }
+
+  if (query.data?.startsWith('reply_')) {
+    const targetUserId = Number(query.data.replace('reply_', ''));
+    awaitingReply[ADMIN_ID] = targetUserId;
+
+    bot.answerCallbackQuery(query.id);
+    bot.sendMessage(ADMIN_ID,
+      `✏️ Напишите ответ следующим сообщением — он будет доставлен анонимно.`,
+      { parse_mode: 'Markdown' }
+    );
+  }
 });
 
 // ── Ошибки ──────────────────────────────────────────────
