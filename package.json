@@ -1,0 +1,16 @@
+{
+  "name": "proriv-feedback-bot",
+  "version": "1.0.0",
+  "description": "ПРОРЫВ — Анонимная обратная связь",
+  "main": "feedback-bot.js",
+  "scripts": {
+    "start": "node feedback-bot.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "node-telegram-bot-api": "^0.66.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
