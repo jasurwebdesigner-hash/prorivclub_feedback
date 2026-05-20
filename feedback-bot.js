@@ -1,8 +1,3 @@
-// ══════════════════════════════════════════════════════
-//  ПРОРЫВ — Бот обратной связи с возможностью ответа
-//  Запуск: node feedback-bot.js
-// ══════════════════════════════════════════════════════
-
 require('dotenv').config();
 const TelegramBot = require('node-telegram-bot-api');
 
@@ -14,42 +9,53 @@ if (!BOT_TOKEN || !ADMIN_ID) {
   process.exit(1);
 }
 
-const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+const bot = new TelegramBot(BOT_TOKEN, {
+  polling: {
+    interval: 1000,
+    autoStart: true,
+    params: { timeout: 10, allowed_updates: ['message', 'callback_query'] }
+  }
+});
 
-// Когда админ нажал "Ответить" — сохраняем userId получателя
-const awaitingReply = {}; // { adminId: targetUserId }
+// Когда админ нажал "Ответить"
+const awaitingReply = {};
+// Защита от дублирования — запоминаем обработанные update_id
+const processedUpdates = new Set();
 
 console.log('🤖 Бот обратной связи запущен...');
 
-// ── /start ──────────────────────────────────────────────
-bot.onText(/\/start/, (msg) => {
-  bot.sendMessage(msg.chat.id,
-    `Добро пожаловать в бот анонимной обратной связи мужского клуба «ПРОРЫВ».\n\n` +
-    `Здесь вы можете написать любое пожелание, идею, замечание или вопрос. Мы внимательно читаем каждое сообщение и стараемся ответить в кратчайшие сроки.\n\n` +
-    `Все сообщения полностью анонимны. Однако если вы хотите, чтобы мы знали к кому обратиться — можете указать своё имя в сообщении.`
-  );
-});
-
-// ── Входящее сообщение ──────────────────────────────────
 bot.on('message', async (msg) => {
-  // Игнорируем ВСЕ команды (включая /start)
-  if (!msg.text || msg.text.startsWith('/')) return;
-  // Игнорируем не-текстовые сообщения
-  if (msg.content_type && msg.content_type !== 'text') return;
+  // Защита от дублей
+  if (processedUpdates.has(msg.message_id)) return;
+  processedUpdates.add(msg.message_id);
+  // Чистим старые ID чтобы не копилось
+  if (processedUpdates.size > 1000) processedUpdates.clear();
 
   const userId = msg.chat.id;
-  const text   = msg.text;
+  const text   = msg.text || '';
 
-  // Если АДМИН сейчас в режиме ответа — отправляем его ответ пользователю
+  // /start
+  if (text === '/start') {
+    bot.sendMessage(userId,
+      `Добро пожаловать в бот анонимной обратной связи мужского клуба «ПРОРЫВ».\n\n` +
+      `Здесь вы можете написать любое пожелание, идею, замечание или вопрос. Мы внимательно читаем каждое сообщение и стараемся ответить в кратчайшие сроки.\n\n` +
+      `Все сообщения полностью анонимны. Однако если вы хотите, чтобы мы знали к кому обратиться — можете указать своё имя в сообщении.`
+    );
+    return;
+  }
+
+  // Игнорируем остальные команды
+  if (text.startsWith('/')) return;
+
+  // Если нет текста
+  if (!text.trim()) return;
+
+  // Если АДМИН в режиме ответа
   if (userId === ADMIN_ID && awaitingReply[ADMIN_ID]) {
     const targetUserId = awaitingReply[ADMIN_ID];
     delete awaitingReply[ADMIN_ID];
-
     try {
-      await bot.sendMessage(targetUserId,
-        `💬 *Ответ от команды ПРОРЫВ:*\n\n${text}`,
-        { parse_mode: 'Markdown' }
-      );
+      await bot.sendMessage(targetUserId, `💬 Ответ от команды ПРОРЫВ:\n\n${text}`);
       bot.sendMessage(ADMIN_ID, '✅ Ответ отправлен.');
     } catch {
       bot.sendMessage(ADMIN_ID, '❌ Не удалось отправить — пользователь мог заблокировать бота.');
@@ -57,7 +63,7 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  // Не отправляем сообщения самого админа как обратную связь
+  // Сообщения от самого админа не пересылаем
   if (userId === ADMIN_ID) return;
 
   const time = new Date().toLocaleString('ru', {
@@ -66,45 +72,31 @@ bot.on('message', async (msg) => {
     hour: '2-digit', minute: '2-digit'
   });
 
-  // Подтверждение пользователю — только одно сообщение
-  bot.sendMessage(userId,
-    `✅ Сообщение получено. Мы прочитаем и ответим если потребуется.`
-  );
+  // Одно подтверждение пользователю
+  bot.sendMessage(userId, `✅ Сообщение получено. Мы прочитаем и ответим если потребуется.`);
 
-  // Отправляем админу с кнопкой "Ответить"
-  await bot.sendMessage(ADMIN_ID,
-    `📩 *Новая обратная связь*\n\n${text}\n\n_${time} · анонимно_`,
+  // Пересылаем админу
+  bot.sendMessage(ADMIN_ID,
+    `📩 Новая обратная связь\n\n${text}\n\n${time} · анонимно`,
     {
-      parse_mode: 'Markdown',
       reply_markup: {
-        inline_keyboard: [[
-          { text: '💬 Ответить', callback_data: `reply_${userId}` }
-        ]]
+        inline_keyboard: [[{ text: '💬 Ответить', callback_data: `reply_${userId}` }]]
       }
     }
   );
 });
 
-// ── Нажатие кнопки "Ответить" ───────────────────────────
 bot.on('callback_query', async (query) => {
   if (query.from.id !== ADMIN_ID) {
     bot.answerCallbackQuery(query.id, { text: 'Нет доступа.' });
     return;
   }
-
   if (query.data?.startsWith('reply_')) {
     const targetUserId = Number(query.data.replace('reply_', ''));
     awaitingReply[ADMIN_ID] = targetUserId;
-
     bot.answerCallbackQuery(query.id);
-    bot.sendMessage(ADMIN_ID,
-      `✏️ Напишите ответ следующим сообщением — он будет доставлен анонимно.`,
-      { parse_mode: 'Markdown' }
-    );
+    bot.sendMessage(ADMIN_ID, `✏️ Напишите ответ следующим сообщением — он будет доставлен анонимно.`);
   }
 });
 
-// ── Ошибки ──────────────────────────────────────────────
-bot.on('polling_error', (err) => {
-  console.error('Polling error:', err.message);
-});
+bot.on('polling_error', (err) => console.error('Polling error:', err.message));
