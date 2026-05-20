@@ -64,7 +64,10 @@ bot.on('message', async (msg) => {
   }
 
   // Сообщения от самого админа не пересылаем
-  if (userId === ADMIN_ID) return;
+  if (userId === ADMIN_ID) {
+    console.log(`Сообщение от админа (${userId}), игнорируем`);
+    return;
+  }
 
   const time = new Date().toLocaleString('ru', {
     timeZone: 'Asia/Tashkent',
@@ -72,18 +75,25 @@ bot.on('message', async (msg) => {
     hour: '2-digit', minute: '2-digit'
   });
 
+  console.log(`Новое сообщение от ${userId}, отправляем админу ${ADMIN_ID}`);
+
   // Одно подтверждение пользователю
   bot.sendMessage(userId, `✅ Сообщение получено. Мы прочитаем и ответим если потребуется.`);
 
   // Пересылаем админу
-  bot.sendMessage(ADMIN_ID,
-    `📩 Новая обратная связь\n\n${text}\n\n${time} · анонимно`,
-    {
-      reply_markup: {
-        inline_keyboard: [[{ text: '💬 Ответить', callback_data: `reply_${userId}` }]]
+  try {
+    await bot.sendMessage(ADMIN_ID,
+      `📩 Новая обратная связь\n\n${text}\n\n${time} · анонимно`,
+      {
+        reply_markup: {
+          inline_keyboard: [[{ text: '💬 Ответить', callback_data: `reply_${userId}` }]]
+        }
       }
-    }
-  );
+    );
+    console.log(`✅ Сообщение успешно отправлено админу ${ADMIN_ID}`);
+  } catch (err) {
+    console.error(`❌ Ошибка отправки админу ${ADMIN_ID}:`, err.message);
+  }
 });
 
 bot.on('callback_query', async (query) => {
