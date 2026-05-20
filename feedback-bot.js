@@ -23,7 +23,6 @@ console.log('🤖 Бот обратной связи запущен...');
 
 // ── /start ──────────────────────────────────────────────
 bot.onText(/\/start/, (msg) => {
-  const name = msg.from.first_name || 'друг';
   bot.sendMessage(msg.chat.id,
     `Добро пожаловать в бот анонимной обратной связи мужского клуба «ПРОРЫВ».\n\n` +
     `Здесь вы можете написать любое пожелание, идею, замечание или вопрос. Мы внимательно читаем каждое сообщение и стараемся ответить в кратчайшие сроки.\n\n` +
@@ -33,10 +32,13 @@ bot.onText(/\/start/, (msg) => {
 
 // ── Входящее сообщение ──────────────────────────────────
 bot.on('message', async (msg) => {
-  const userId = msg.chat.id;
-  const text   = msg.text || '';
+  // Игнорируем ВСЕ команды (включая /start)
+  if (!msg.text || msg.text.startsWith('/')) return;
+  // Игнорируем не-текстовые сообщения
+  if (msg.content_type && msg.content_type !== 'text') return;
 
-  if (text.startsWith('/')) return;
+  const userId = msg.chat.id;
+  const text   = msg.text;
 
   // Если АДМИН сейчас в режиме ответа — отправляем его ответ пользователю
   if (userId === ADMIN_ID && awaitingReply[ADMIN_ID]) {
@@ -55,17 +57,18 @@ bot.on('message', async (msg) => {
     return;
   }
 
-  // Обычное сообщение от пользователя
+  // Не отправляем сообщения самого админа как обратную связь
+  if (userId === ADMIN_ID) return;
+
   const time = new Date().toLocaleString('ru', {
     timeZone: 'Asia/Tashkent',
     day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit'
   });
 
-  // Подтверждение пользователю
+  // Подтверждение пользователю — только одно сообщение
   bot.sendMessage(userId,
-    `✅ Сообщение получено. Мы ответим если потребуется.\n\n_Спасибо за обратную связь!_`,
-    { parse_mode: 'Markdown' }
+    `✅ Сообщение получено. Мы прочитаем и ответим если потребуется.`
   );
 
   // Отправляем админу с кнопкой "Ответить"
